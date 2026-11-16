@@ -70,6 +70,28 @@ local function newFrame(parent)
         return 14 * math.max(1, math.ceil(#(self.text or "") / math.max(1, (self.width or 610) / 7)))
     end
     function f:CreateFontString() return newFrame() end
+    function f:GetFont() return "Fonts\\FRIZQT__.TTF", 12, "" end
+    function f:SetFont(font, size) self.font, self.fontSize = font, size end
+    function f:SetTextColor() end
+    function f:SetSpacing() end
+    function f:SetBackdrop(value) self.backdrop = value end
+    function f:SetBackdropColor(r, g, b) self.backgroundColor = { r, g, b } end
+    function f:SetBackdropBorderColor() end
+    function f:SetAlpha(value) self.alpha = value end
+    function f:IsEnabled() return self.enabled ~= false end
+    function f:SetShown(value) if value then self:Show() else self:Hide() end end
+    function f:SetOrientation() end
+    function f:SetMinMaxValues(minimum, maximum) self.minimum, self.maximum = minimum, maximum end
+    function f:SetValueStep() end
+    function f:SetThumbTexture() self.thumb = newFrame() end
+    function f:GetThumbTexture() return self.thumb end
+    function f:SetVertexColor() end
+    function f:EnableMouseWheel() end
+    function f:SetScale(value) self.scale = value end
+    function f:SetValue(value)
+        self.value = math.max(self.minimum or 0, math.min(self.maximum or value, value))
+        if self.scripts.OnValueChanged then self.scripts.OnValueChanged(self, self.value) end
+    end
     function f:SetJustifyH() end
     function f:SetWordWrap() end
     function f:SetColorTexture() end
@@ -455,6 +477,7 @@ local popup, abandoned, selectedQuest, abandonTarget = nil, {}, 167, nil
 StaticPopup_Show = function(key, title, _, data) popup = { key = key, title = title, data = data } end
 loadAddonFile("OrphanQuests.lua", Helper)
 local orphanEvents = frames[#frames]
+loadAddonFile("OrphanWindow.lua", Helper)
 local orphanList, orphanReason = Helper.GetOrphanQuests()
 check(#orphanList == 0 and orphanReason:find("could not be read", 1, true), "failed guide scan never produces false orphan results")
 RXP.RemoveGuide("bad")
@@ -498,10 +521,14 @@ altDown = false
 SlashCmdList.RESTEDXPHELPER("orphan")
 local orphanWindow = _G.RestedXPHelperOrphanFrame
 check(SLASH_RESTEDXPHELPER3 == "/rxh" and orphanWindow:IsShown(), "/rxh orphan opens the quest list")
-check(#orphanWindow.rows == 3 and orphanWindow.rows[2].description:GetText():find("Collect 8 samples.", 1, true), "window renders quest descriptions and objectives")
-check(not orphanWindow.rows[3].abandon.enabled, "unavailable abandon action is disabled")
+orphanWindow.rows[2].scripts.OnClick(orphanWindow.rows[2])
+check(#orphanWindow.rows == 3 and orphanWindow.detail.description:GetText():find("Full native quest description", 1, true)
+    and orphanWindow.detail.objectives:GetText() == "Collect 8 samples.", "two-panel window renders selected quest description and objectives")
+orphanWindow.rows[3].scripts.OnClick(orphanWindow.rows[3])
+check(not orphanWindow.detail.abandon.enabled, "unavailable abandon action is disabled")
 check(UISpecialFrames[#UISpecialFrames] == "RestedXPHelperOrphanFrame", "Escape can close orphan window")
-orphanWindow.rows[2].abandon.scripts.OnClick()
+orphanWindow.rows[2].scripts.OnClick(orphanWindow.rows[2])
+orphanWindow.detail.abandon.scripts.OnClick()
 check(popup and popup.data.questID == 901 and #abandoned == 0, "Abandon button asks for confirmation without removing quest")
 local confirmedData = popup.data
 local nowMatched = guide("now-matched", "New guide", { { tag = "accept", questId = 901 } })
@@ -541,7 +568,61 @@ flush()
 table.insert(log, { questID = 905, title = "Accepted after opening" })
 orphanEvents.scripts.OnEvent(orphanEvents, "QUEST_LOG_UPDATE")
 flush()
-check(orphanWindow.status:GetText():find("4 quests", 1, true), "open orphan list refreshes when quest log changes")
+check(orphanWindow.count:GetText():find("4 quests", 1, true), "open orphan list refreshes when quest log changes")
+
+check(orphanWindow.backdrop.bgFile == "Interface\\Buttons\\WHITE8X8" and orphanWindow.backdrop.edgeSize == 1,
+    "orphan window uses flat suite-style backdrop instead of Blizzard window chrome")
+check(orphanWindow.list ~= orphanWindow.detail.scroll and orphanWindow.detail.scroll.content ~= orphanWindow.list.content,
+    "quest list and description scroll independently")
+check(orphanWindow.headers[1].title:GetText() == "Collapsed zone", "quest list shows native zone heading")
+Helper.SelectOrphanQuest(904)
+Helper.RefreshOrphanWindow()
+check(orphanWindow.selectedID == 904, "refresh retains selected quest")
+
+Enum.QuestTag = { Dungeon = 81, Heroic = 85 }
+C_QuestLog.GetQuestTagInfo = function(id)
+    if id == 902 then return { tagID = 81 } end
+    if id == 906 then return { tagID = 85 } end
+    if id == 907 then return { tagID = 1 } end
+end
+ForeverDungeonJournal_NS.DB = { CustomDungeon = { quests = { { id = 905 } } } }
+table.insert(log, { isHeader = true, title = "New zone" })
+table.insert(log, { questID = 906, title = "Heroic quest", level = 20 })
+table.insert(log, { questID = 907, title = "Outdoor elite quest", level = 20 })
+Helper.RefreshOrphanWindow()
+check(Helper.IsDungeonQuest(902) and Helper.IsDungeonQuest(906) and Helper.IsDungeonQuest(905),
+    "dungeon detection covers native dungeon, heroic and custom Forever DJ quests")
+check(not Helper.IsDungeonQuest(907), "outdoor elite quests are not mistaken for dungeon quests")
+orphanList = Helper.GetOrphanQuests(false)
+check(orphanList[#orphanList].zone == "New zone" and #orphanList == 6, "quests sort into zones from the log headers")
+Helper.SelectOrphanQuest(905)
+orphanWindow.filter.scripts.OnClick(orphanWindow.filter)
+local hiddenCount
+orphanList, orphanReason, hiddenCount = Helper.GetOrphanQuests()
+check(#orphanList == 3 and hiddenCount == 3 and not orphanReason, "dungeon toggle excludes native and DJ dungeon quests with correct count")
+check(RestedXPHelperDB.excludeDungeonQuests and orphanWindow.filter.checked and orphanWindow.filter.indicator:IsShown(),
+    "dungeon toggle persists to addon settings and shows checked state")
+check(orphanWindow.selectedID ~= 905 and orphanWindow.questsByID[orphanWindow.selectedID],
+    "filtering out selected quest selects another visible quest")
+check(orphanWindow.count:GetText():find("3 dungeon hidden", 1, true), "filtered dungeon count is visible")
+orphanWindow:Hide()
+Helper.ShowOrphanWindow()
+check(orphanWindow.filter.checked and #Helper.GetOrphanQuests() == 3, "dungeon filter survives closing and reopening")
+Helper.SetExcludeDungeonQuests(false)
+check(#Helper.GetOrphanQuests() == 6 and not orphanWindow.filter.indicator:IsShown(), "turning filter off restores dungeon quests")
+
+EllesmereUI = { GetAccentColor = function() return 0.8, 0.6, 0.4 end,
+    GetFontPath = function() return "EUI font" end, DARK_BG = { r = 0.07, g = 0.06, b = 0.05 } }
+local theme = Helper.GetOrphanTheme()
+check(theme.source == "EllesmereUI" and theme.font == "EUI font" and theme.accent.r == 0.8,
+    "orphan theme inherits EllesmereUI accent, background and font")
+EllesmereUI = nil
+ElvUI = { { db = { general = { valuecolor = { r = 0.3, g = 0.7, b = 0.9 } } },
+    media = { normFont = "Elv font", backdropcolor = { 0.1, 0.1, 0.1 } } } }
+theme = Helper.GetOrphanTheme()
+check(theme.source == "ElvUI" and theme.font == "Elv font" and theme.accent.b == 0.9,
+    "orphan theme falls back to ElvUI settings")
+ElvUI = nil
 RXP.RemoveGuide("orphan-test-other")
 flush()
 

@@ -2,12 +2,14 @@
 ## Title: RestedXP Helper
 ## Notes: RestedXP guide information in quest tooltips and Dungeon Journal quest markers.
 ## Author: alext
-## Version: 1.3.0
+## Version: 1.4.0
 ## Dependencies: RXPGuides
-## OptionalDeps: ForeverDungeonJournal, Questie
+## OptionalDeps: ForeverDungeonJournal, Questie, EllesmereUI, ElvUI
+## SavedVariables: RestedXPHelperDB
 ## IconTexture: Interface\AddOns\RXPGuides\Textures\rxp_logo-64
 
 Index.lua
 Core.lua
 QuestTooltips.lua
 OrphanQuests.lua
+OrphanWindow.lua

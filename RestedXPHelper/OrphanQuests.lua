@@ -1,6 +1,44 @@
 local _, Helper = ...
-local window, queued
+local queued
 local requested = {}
+local dungeonDB, dungeonIDs
+
+function Helper.GetOrphanSettings()
+    RestedXPHelperDB = RestedXPHelperDB or {}
+    return RestedXPHelperDB
+end
+
+function Helper.ResetOrphanDescriptionRequests()
+    requested = {}
+end
+
+function Helper.IsDungeonQuest(questID)
+    local tagID
+    if C_QuestLog and C_QuestLog.GetQuestTagInfo then
+        local tag = C_QuestLog.GetQuestTagInfo(questID)
+        if tag and not (issecretvalue and issecretvalue(tag)) then tagID = tag.tagID end
+    elseif GetQuestTagInfo then
+        tagID = GetQuestTagInfo(questID)
+    end
+    if not (issecretvalue and issecretvalue(tagID)) then
+        local tags = Enum and Enum.QuestTag or {}
+        -- Native Classic quest types: Dungeon 81 and Heroic dungeon 85.
+        if tagID == (tags.Dungeon or 81) or tagID == (tags.Heroic or 85) then return true end
+    end
+    -- Forever has custom dungeon quests whose native tag may be missing.
+    local dj = _G.ForeverDungeonJournal_NS
+    local db = dj and dj.DB
+    if db ~= dungeonDB or not dungeonIDs then
+        dungeonDB, dungeonIDs = db, {}
+        for _, dungeon in pairs(db or {}) do
+            for _, quest in ipairs(dungeon.quests or {}) do
+                local id = Helper.QuestID(quest.id)
+                if id then dungeonIDs[id] = true end
+            end
+        end
+    end
+    return dungeonIDs[questID] == true
+end
 
 local function IsPublic(value)
     return not (issecretvalue and issecretvalue(value))
@@ -53,7 +91,8 @@ local function Description(logIndex, questID)
     return "Description is not available yet."
 end
 
-function Helper.GetOrphanQuests()
+function Helper.GetOrphanQuests(excludeDungeons)
+    if excludeDungeons == nil then excludeDungeons = Helper.GetOrphanSettings().excludeDungeonQuests == true end
     local status = Helper.GetGuideIndexStatus()
     if not status.ready then
         if status.failed > 0 and not status.pending then
@@ -61,30 +100,43 @@ function Helper.GetOrphanQuests()
         end
         return {}, "Waiting for the full RXP guide scan to finish..."
     end
-    local quests, seen = {}, {}
+    local quests, seen, hiddenDungeons = {}, {}, 0
+    local zone = "Other quests"
     for logIndex = 1, LogSize() do
         local info = Entry(logIndex)
-        if info and IsPublic(info.isHeader) and not info.isHeader then
+        if info and IsPublic(info.isHeader) and info.isHeader then
+            if IsPublic(info.title) and type(info.title) == "string" and info.title ~= "" then
+                zone = Helper.CleanText(info.title)
+            else zone = "Other quests" end
+        elseif info and IsPublic(info.isHeader) and not info.isHeader then
             local id = Helper.QuestID(info.questID)
             if id and not seen[id] and not Helper.IsQuestInAnyGuide(id) then
                 seen[id] = true
-                local description, objectives = Description(logIndex, id)
-                quests[#quests + 1] = {
-                    id = id,
-                    title = IsPublic(info.title) and type(info.title) == "string" and info.title or ("Quest " .. id),
-                    level = IsPublic(info.level) and type(info.level) == "number" and info.level or nil,
-                    description = description,
-                    objectives = objectives,
-                    canAbandon = CanAbandon(id),
-                }
+                local dungeon = Helper.IsDungeonQuest(id)
+                if excludeDungeons and dungeon then
+                    hiddenDungeons = hiddenDungeons + 1
+                else
+                    local description, objectives = Description(logIndex, id)
+                    quests[#quests + 1] = {
+                        id = id,
+                        title = IsPublic(info.title) and type(info.title) == "string" and info.title or ("Quest " .. id),
+                        level = IsPublic(info.level) and type(info.level) == "number" and info.level or nil,
+                        description = description,
+                        objectives = objectives,
+                        canAbandon = CanAbandon(id),
+                        zone = zone,
+                        isDungeon = dungeon,
+                    }
+                end
             end
         end
     end
     table.sort(quests, function(a, b)
+        if a.zone ~= b.zone then return a.zone < b.zone end
         if a.title == b.title then return a.id < b.id end
         return a.title < b.title
     end)
-    return quests
+    return quests, nil, hiddenDungeons
 end
 
 local function ValidateAbandon(questID)
@@ -97,6 +149,7 @@ local function ValidateAbandon(questID)
 end
 
 local function Message(text)
+    local window = _G.RestedXPHelperOrphanFrame
     if window then window.status:SetText(text) end
     if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage("|cffffd166RestedXP Helper:|r " .. text) end
 end
@@ -168,116 +221,13 @@ function Helper.ConfirmAbandonOrphan(value)
     StaticPopup_Show("RESTEDXPHELPER_ABANDON_ORPHAN", info.title, nil, { questID = id })
 end
 
-local function NewRow(parent)
-    local row = CreateFrame("Frame", nil, parent)
-    row:SetWidth(610)
-    row.title = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    row.title:SetPoint("TOPLEFT", 0, 0)
-    row.title:SetWidth(492)
-    row.title:SetJustifyH("LEFT")
-    row.title:SetWordWrap(true)
-    row.abandon = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-    row.abandon:SetSize(92, 24)
-    row.abandon:SetPoint("TOPRIGHT", 0, 3)
-    row.abandon:SetText("Abandon")
-    row.abandon:SetScript("OnClick", function() Helper.ConfirmAbandonOrphan(row.questID) end)
-    row.description = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    row.description:SetPoint("TOPLEFT", row.title, "BOTTOMLEFT", 0, -8)
-    row.description:SetWidth(610)
-    row.description:SetJustifyH("LEFT")
-    row.description:SetWordWrap(true)
-    row.divider = row:CreateTexture(nil, "ARTWORK")
-    row.divider:SetColorTexture(1, 1, 1, 0.12)
-    row.divider:SetHeight(1)
-    row.divider:SetPoint("BOTTOMLEFT", 0, 4)
-    row.divider:SetPoint("BOTTOMRIGHT", 0, 4)
-    return row
-end
-
-function Helper.RefreshOrphanWindow()
-    if not window or not window:IsShown() then return end
-    local quests, reason = Helper.GetOrphanQuests()
-    if reason then window.status:SetText(reason)
-    elseif #quests == 0 then window.status:SetText("All quests in your log belong to an installed RXP guide.")
-    else window.status:SetText(#quests .. " quests outside all installed RXP guides") end
-    local y = 0
-    for i, quest in ipairs(quests) do
-        local row = window.rows[i]
-        if not row then row = NewRow(window.content); window.rows[i] = row end
-        row.questID = quest.id
-        row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", window.content, "TOPLEFT", 0, -y)
-        local level = quest.level and quest.level > 0 and ("[" .. quest.level .. "] ") or ""
-        row.title:SetText(level .. quest.title .. "  |cff888888#" .. quest.id .. "|r")
-        local text = quest.description
-        if quest.objectives and quest.objectives ~= "" and quest.objectives ~= text then
-            text = text .. "\n\n" .. quest.objectives
-        end
-        row.description:SetText(text)
-        row.abandon:SetEnabled(quest.canAbandon)
-        row:SetHeight(math.max(24, row.title:GetStringHeight()) + row.description:GetStringHeight() + 28)
-        row:Show()
-        y = y + row:GetHeight() + 12
-    end
-    for i = #quests + 1, #window.rows do window.rows[i]:Hide() end
-    window.content:SetHeight(math.max(1, y))
-    local limit = math.max(0, y - window.scroll:GetHeight())
-    if window.scroll:GetVerticalScroll() > limit then window.scroll:SetVerticalScroll(limit) end
-end
-
-function Helper.ShowOrphanWindow()
-    if not window then
-        window = CreateFrame("Frame", "RestedXPHelperOrphanFrame", UIParent, "BasicFrameTemplateWithInset")
-        window:SetSize(680, 540)
-        window:SetPoint("CENTER")
-        window:SetFrameStrata("DIALOG")
-        window:SetClampedToScreen(true)
-        window:SetMovable(true)
-        window:EnableMouse(true)
-        window:RegisterForDrag("LeftButton")
-        window:SetScript("OnDragStart", window.StartMoving)
-        window:SetScript("OnDragStop", window.StopMovingOrSizing)
-        window.TitleText:SetText("RestedXP Helper - Orphan quests")
-        window.status = window:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-        window.status:SetPoint("TOPLEFT", 18, -38)
-        window.status:SetWidth(640)
-        window.status:SetJustifyH("LEFT")
-        window.status:SetWordWrap(true)
-        local subtitle = window:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-        subtitle:SetPoint("TOPLEFT", 18, -70)
-        subtitle:SetText("Current quest log / all guide groupings")
-        window.scroll = CreateFrame("ScrollFrame", nil, window, "UIPanelScrollFrameTemplate")
-        window.scroll:SetPoint("TOPLEFT", 18, -96)
-        window.scroll:SetPoint("BOTTOMRIGHT", -36, 48)
-        window.content = CreateFrame("Frame", nil, window.scroll)
-        window.content:SetSize(610, 1)
-        window.scroll:SetScrollChild(window.content)
-        window.rows = {}
-        local rescan = CreateFrame("Button", nil, window, "UIPanelButtonTemplate")
-        rescan:SetSize(130, 24)
-        rescan:SetPoint("BOTTOMLEFT", 18, 14)
-        rescan:SetText("Rescan guides")
-        rescan:SetScript("OnClick", function() Helper.RequestGuideRescan() end)
-        local refresh = CreateFrame("Button", nil, window, "UIPanelButtonTemplate")
-        refresh:SetSize(90, 24)
-        refresh:SetPoint("LEFT", rescan, "RIGHT", 8, 0)
-        refresh:SetText("Refresh")
-        refresh:SetScript("OnClick", Helper.RefreshOrphanWindow)
-        window:SetScript("OnShow", Helper.RefreshOrphanWindow)
-        table.insert(UISpecialFrames, "RestedXPHelperOrphanFrame")
-    end
-    requested = {}
-    window.scroll:SetVerticalScroll(0)
-    window:Show()
-    Helper.RefreshOrphanWindow()
-end
-
 local events = CreateFrame("Frame")
 events:RegisterEvent("QUEST_LOG_UPDATE")
 events:RegisterEvent("QUEST_DATA_LOAD_RESULT")
 events:RegisterEvent("PLAYER_REGEN_ENABLED")
 events:RegisterEvent("PLAYER_REGEN_DISABLED")
 events:SetScript("OnEvent", function()
+    local window = _G.RestedXPHelperOrphanFrame
     if not window or not window:IsShown() or queued then return end
     queued = true
     C_Timer.After(0.1, function() queued = false; Helper.RefreshOrphanWindow() end)

@@ -11,7 +11,7 @@ if (-not (Test-Path -LiteralPath $addons -PathType Container)) {
 if (-not (Test-Path -LiteralPath (Join-Path $addons 'RXPGuides') -PathType Container)) {
     throw 'Required addon is missing: RXPGuides'
 }
-$files = @('RestedXPHelper.toc', 'Index.lua', 'Core.lua', 'QuestTooltips.lua', 'OrphanQuests.lua')
+$files = @('RestedXPHelper.toc', 'Index.lua', 'Core.lua', 'QuestTooltips.lua', 'OrphanQuests.lua', 'OrphanWindow.lua')
 foreach ($name in $files) {
     if (-not (Test-Path -LiteralPath (Join-Path $source $name) -PathType Leaf)) {
         throw "Source file is missing: $name"

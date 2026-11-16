@@ -33,7 +33,7 @@ The default destination is
 `I:\World of Warcraft_2\_forever_\Interface\AddOns\RestedXPHelper`.
 Pass `-WoWPath 'D:\World of Warcraft'` to use a different installation.
 The installer backs up existing `RXPDJBridge` and `RestedXPHelper` directories
-outside AddOns before copying the five addon files and checking their hashes.
+outside AddOns before copying the six addon files and checking their hashes.
 Backups go to `%USERPROFILE%\.t3\backups\rxp-helper`. Override this with
 `-BackupRoot 'D:\WoW Backups'`. The original and renamed builds must not run
 together.
@@ -67,8 +67,18 @@ Commands, also available through `/rxh` and the old `/rxpdj` alias:
 - `/rxph rescan` rebuilds the index, useful after changing RXP route settings.
 - `/rxph quest 167` lists matching guides for a quest ID.
 
-The orphan window shows each quest's full description, objectives and an
-**Abandon** button. It checks every indexed guide grouping, regardless of your
+The orphan window has a zone-grouped quest list on the left and the selected
+quest's full description, objectives and **Abandon quest** button on the right.
+The panels scroll independently, and selection stays in place during updates.
+The flat dark theme inherits EllesmereUI's accent, background and font when
+available, falls back to ElvUI's settings, and also works without either suite.
+
+**Exclude dungeon quests** hides quests marked as dungeon/heroic by the client
+or listed in ForeverDungeonJournal's dungeon data. Outdoor elite quests remain
+visible. The toggle remembers its setting between sessions, and the count shows
+how many dungeon quests are hidden.
+
+The list checks every indexed guide grouping, regardless of your
 current guide or Alt. It waits for a complete, successful guide scan before
 showing results and updates when your quest log changes. **Rescan guides**
 rebuilds the guide index; **Refresh** updates the quest list.
@@ -95,6 +105,7 @@ The original DJ-only build is committed and tagged `v1.0.0-dj-bridge`.
 The rename and quest tooltip support are version `1.1.0`.
 Current-group filtering and the Alt override are version `1.2.0`.
 The orphan quest window is version `1.3.0`.
+The two-panel zone browser, suite styling and dungeon filter are version `1.4.0`.
 
 To return to the original build, close WoW, move `RestedXPHelper` out of the
 AddOns directory, then restore the backed-up `RXPDJBridge` folder there. A ZIP
@@ -122,7 +133,9 @@ native and Questie tooltips, imports/removals, optional Dungeon Journal and
 combat deferral, current-group filtering, live Alt expansion and collapse, and
 switching guide groupings without rebuilding the index. Orphan checks cover
 cross-group matching, descriptions, live list updates, confirmations and
-abandoning the correct quest after log positions change. Tests cannot verify
+abandoning the correct quest after log positions change. UI checks cover zone
+grouping, independent panels, selection, saved dungeon filtering, and EllesmereUI
+and ElvUI theme lookup. Tests cannot verify
 rendering in the game client. In-game checks should cover switching dungeons,
 expanding prerequisite chains, changing RXP routes, hovering quest tooltips,
 clicking chat quest links and opening `/rxh orphan`.
