@@ -1,0 +1,12 @@
+## Interface: 16001
+## Title: RestedXP Helper
+## Notes: RestedXP guide information in quest tooltips and Dungeon Journal quest markers.
+## Author: alext
+## Version: 1.1.0
+## Dependencies: RXPGuides
+## OptionalDeps: ForeverDungeonJournal, Questie
+## IconTexture: Interface\AddOns\RXPGuides\Textures\rxp_logo-64
+
+Index.lua
+Core.lua
+QuestTooltips.lua

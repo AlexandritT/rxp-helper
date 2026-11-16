@@ -1,4 +1,4 @@
-local _, Bridge = ...
+local _, Helper = ...
 
 local questTags = {
     accept = true, turnin = true, complete = true, collect = true,
@@ -9,13 +9,14 @@ local multipleTags = {
     daily = true, dailyturnin = true, acceptmultiple = true, turninmultiple = true,
 }
 
-function Bridge.QuestID(value)
+function Helper.QuestID(value)
+    if issecretvalue and issecretvalue(value) then return nil end
     local id = tonumber(value)
     if not id or id == 0 or id ~= math.floor(id) then return nil end
     return math.abs(id)
 end
 
-function Bridge.CleanText(value)
+function Helper.CleanText(value)
     if type(value) ~= "string" then return "" end
     return (value:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
         :gsub("|T.-|t", ""):gsub("|A.-|a", ""))
@@ -23,21 +24,21 @@ end
 
 -- Read RXP's parsed elements, never guide text or quest titles. RXP has
 -- already applied faction, class, race and quest-ID conversions here.
-function Bridge.IndexGuide(index, guide)
+function Helper.IndexGuide(index, guide)
     if type(guide) ~= "table" or guide.disabled or guide.internal
         or not guide.name or type(guide.steps) ~= "table" then return false end
 
-    local group = Bridge.CleanText(guide.groupdisplayname or guide.group)
-    local name = Bridge.CleanText(guide.displayname or guide.name)
+    local group = Helper.CleanText(guide.groupdisplayname or guide.group)
+    local name = Helper.CleanText(guide.displayname or guide.name)
     local record = {
         key = guide.key or ((guide.group or "") .. "||" .. guide.name),
         name = name,
         group = group,
-        subgroup = Bridge.CleanText(guide.subgroup),
+        subgroup = Helper.CleanText(guide.subgroup),
     }
 
     local function AddQuest(value, stepNumber)
-        local id = Bridge.QuestID(value)
+        local id = Helper.QuestID(value)
         if not id then return end
         local matches = index[id]
         if not matches then matches = {}; index[id] = matches end
@@ -65,9 +66,9 @@ function Bridge.IndexGuide(index, guide)
     return true
 end
 
-function Bridge.GetMatches(index, questID)
+function Helper.GetMatches(index, questID)
     local matches = {}
-    for _, match in pairs(index[Bridge.QuestID(questID)] or {}) do
+    for _, match in pairs(index[Helper.QuestID(questID)] or {}) do
         matches[#matches + 1] = match
     end
     table.sort(matches, function(a, b)

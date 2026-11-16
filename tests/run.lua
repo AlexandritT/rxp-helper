@@ -5,11 +5,11 @@ local function check(value, message)
     passed = passed + 1
 end
 local function loadAddonFile(path, namespace)
-    assert(loadfile("RXPDJBridge/" .. path))("RXPDJBridge", namespace)
+    assert(loadfile("RestedXPHelper/" .. path))("RestedXPHelper", namespace)
 end
 
-local Bridge = {}
-loadAddonFile("Index.lua", Bridge)
+local Helper = {}
+loadAddonFile("Index.lua", Helper)
 local function guide(key, name, elements)
     return {
         key = key, name = name, group = "RestedXP Forever Guide (A)",
@@ -28,26 +28,26 @@ local first = guide("first", "17-18 Deadmines", {
     { tag = "collect", id = 888 },
 })
 first.steps[2] = { elements = { { tag = "turnin", questId = 167 } } }
-check(Bridge.IndexGuide(index, first), "parsed guide indexed")
-check(#Bridge.GetMatches(index, 167) == 1, "repeated objectives deduplicate guide")
-check(table.concat(Bridge.GetMatches(index, 167)[1].steps, ",") == "1,2", "steps deduplicate and sort")
+check(Helper.IndexGuide(index, first), "parsed guide indexed")
+check(#Helper.GetMatches(index, 167) == 1, "repeated objectives deduplicate guide")
+check(table.concat(Helper.GetMatches(index, 167)[1].steps, ",") == "1,2", "steps deduplicate and sort")
 check(index[168] ~= nil and index[-168] == nil, "negative optional quest IDs normalize")
 check(index[214] ~= nil and index[12345] == nil, "collection quest uses quest ID, not item ID")
 check(index[100] and index[101] and index[102], "daily and multiple quest IDs indexed")
 check(not index[999] and not index[888], "non-quest references and items ignored")
-check(Bridge.QuestID("167") == 167 and not Bridge.QuestID(0)
-    and not Bridge.QuestID("garbage") and not Bridge.QuestID(1.5), "invalid quest IDs rejected")
-check(#Bridge.GetMatches(index, nil) == 0, "empty lookup safe")
+check(Helper.QuestID("167") == 167 and not Helper.QuestID(0)
+    and not Helper.QuestID("garbage") and not Helper.QuestID(1.5), "invalid quest IDs rejected")
+check(#Helper.GetMatches(index, nil) == 0, "empty lookup safe")
 local second = guide("second", "16-20 Westfall", { { tag = "accept", questId = 167 } })
 second.displayname = "|cffff0000Exact guide title|r"
-Bridge.IndexGuide(index, second)
-check(#Bridge.GetMatches(index, 167) == 2, "all matching guides retained")
-check(Bridge.GetMatches(index, 167)[2].guide.name == "Exact guide title", "display name used without color codes")
+Helper.IndexGuide(index, second)
+check(#Helper.GetMatches(index, 167) == 2, "all matching guides retained")
+check(Helper.GetMatches(index, 167)[2].guide.name == "Exact guide title", "display name used without color codes")
 second.disabled = true
-check(not Bridge.IndexGuide({}, second), "disabled guides excluded")
+check(not Helper.IndexGuide({}, second), "disabled guides excluded")
 second.disabled, second.internal = nil, true
-check(not Bridge.IndexGuide({}, second), "internal helpers excluded")
-check(not Bridge.IndexGuide({}, { name = "Lazy" }), "unparsed guide safely skipped")
+check(not Helper.IndexGuide({}, second), "internal helpers excluded")
+check(not Helper.IndexGuide({}, { name = "Lazy" }), "unparsed guide safely skipped")
 
 -- A small WoW API mock exercises event timing, post-hooks, pooled rows and
 -- tooltips. Production code runs unchanged in this environment.
@@ -66,9 +66,34 @@ local function newFrame(parent)
     function f:SetTexture(value) self.texture = value end
     function f:CreateTexture() return newFrame() end
     function f:SetScript(name, fn) self.scripts[name] = fn end
+    function f:HookScript(name, fn)
+        local previous = self.scripts[name]
+        self.scripts[name] = function(...)
+            if previous then previous(...) end
+            fn(...)
+        end
+    end
     function f:RegisterEvent() end
     function f:GetChildren() return (unpack or table.unpack)(self.children) end
     function f:IsShown() return self.shown end
+    function f:IsForbidden() return self.forbidden end
+    function f:ClearLines()
+        self.lines = {}
+        if self.scripts.OnTooltipCleared then self.scripts.OnTooltipCleared(self) end
+    end
+    function f:AddLine(line) self.lines[#self.lines + 1] = line end
+    function f:SetHyperlink(link)
+        self:ClearLines()
+        self:AddLine("Original quest content: " .. link)
+        self:Show()
+    end
+    function f:SetQuestPartyProgress(id)
+        self:ClearLines()
+        self:AddLine("Original quest objectives")
+        self:Show()
+        return true
+    end
+    f.SetQuestByID, f.SetQuestLogTitle = f.SetQuestPartyProgress, f.SetQuestPartyProgress
     function f:Show() self.shown = true end
     function f:Hide()
         if not self.shown then return end
@@ -91,12 +116,36 @@ SlashCmdList = {}
 GameTooltip = newFrame()
 function GameTooltip:SetOwner(owner) self.owner = owner end
 function GameTooltip:GetOwner() return self.owner end
-function GameTooltip:ClearLines() self.lines = {} end
-function GameTooltip:AddLine(line) self.lines[#self.lines + 1] = line end
-local function containsLine(text)
-    for _, line in ipairs(GameTooltip.lines) do if line == text then return true end end
+ItemRefTooltip = newFrame()
+local function containsLine(text, tooltip)
+    for _, line in ipairs((tooltip or GameTooltip).lines) do if line == text then return true end end
     return false
 end
+local function countLine(text, tooltip)
+    local count = 0
+    for _, line in ipairs((tooltip or GameTooltip).lines) do if line == text then count = count + 1 end end
+    return count
+end
+Enum = { TooltipDataType = { Quest = 1, Unit = 2, Item = 3 }, TooltipDataLineType = { QuestTitle = 17 } }
+local dataCallback
+TooltipDataProcessor = { AllTypes = 0, AddTooltipPostCall = function(_, callback) dataCallback = callback end }
+C_QuestLog = { GetInfo = function(logIndex)
+    return { questID = 167, isHeader = logIndex == 4 }
+end }
+local questieMap = { ShowOnTooltip = function(icon, tooltip)
+    tooltip.questOrder = icon.quests
+    tooltip.npcAndObjectOrder = icon.givers
+    tooltip._Rebuild = function(frame)
+        frame:ClearLines()
+        frame:AddLine("Questie original content")
+    end
+    tooltip:_Rebuild()
+    tooltip:Show()
+end }
+local questieTips = { RegisterNativeQuestTooltip = function() end }
+QuestieLoader = { ImportModule = function(_, name)
+    return name == "MapIconTooltip" and questieMap or questieTips
+end }
 hooksecurefunc = function(object, name, callback)
     local original = object[name]
     object[name] = function(...)
@@ -142,7 +191,7 @@ RXP = {
     ReloadGuide = function() end,
 }
 local originalRefreshes = 0
-ForeverDungeonJournal_NS = {
+local djNamespace = {
     MarkLostQuestRows = function() originalRefreshes = originalRefreshes + 1 end,
 }
 ForeverDungeonJournalFrame = newFrame()
@@ -155,20 +204,27 @@ row.chainRows[2].step = { id = 167, itemStep = true }
 local oldClick = function() end
 row:SetScript("OnClick", oldClick)
 
-loadAddonFile("Bridge.lua", Bridge)
+loadAddonFile("Core.lua", Helper)
 local driver = frames[#frames]
+loadAddonFile("QuestTooltips.lua", Helper)
 driver.scripts.OnEvent(driver, "PLAYER_LOGIN")
+GameTooltip:SetHyperlink("quest:167:15")
+check(not containsLine("RestedXP Guides"), "tooltip before first scan preserves base content")
 flush()
 check(fetches == 2, "lazy hardcore guide fetched in two passes")
 check(processes == 1, "RXP expands route includes before indexing")
 check(RXP.currentGuide == selected and selected.progress == 42, "indexing preserves selected guide and progress")
+check(#Helper.GetQuestMatches(167) == 1, "index works without Dungeon Journal installed")
+check(containsLine("17-18 Deadmines"), "open tooltip gains guide information when scan completes")
+ForeverDungeonJournal_NS = djNamespace
+driver.scripts.OnEvent(driver, "ADDON_LOADED")
 ForeverDungeonJournal_NS.MarkLostQuestRows({ row }, {})
 check(originalRefreshes == 1, "journal's original refresh function retained")
-check(row.rxpDJMarker and row.rxpDJMarker:IsShown(), "main quest gets marker")
-check(row.chainRows[1].rxpDJMarker:IsShown(), "included prerequisite gets marker")
-check(not row.chainRows[2].rxpDJMarker, "item steps do not get quest markers")
-check(row.scripts.OnClick == oldClick and row.rxpDJMarker.propagates, "quest row click behavior preserved")
-local marker = row.rxpDJMarker
+check(row.rxpHelperMarker and row.rxpHelperMarker:IsShown(), "main quest gets marker")
+check(row.chainRows[1].rxpHelperMarker:IsShown(), "included prerequisite gets marker")
+check(not row.chainRows[2].rxpHelperMarker, "item steps do not get quest markers")
+check(row.scripts.OnClick == oldClick and row.rxpHelperMarker.propagates, "quest row click behavior preserved")
+local marker = row.rxpHelperMarker
 marker.scripts.OnEnter(marker)
 check(containsLine("17-18 Deadmines") and containsLine("RestedXP Forever Guide (A)"), "hover shows exact guide and group")
 check(containsLine("Steps: 1"), "hover shows guide step")
@@ -180,7 +236,7 @@ ForeverDungeonJournal_NS.MarkLostQuestRows({ row }, {})
 check(not marker:IsShown(), "pooled row hides stale marker for unrelated quest")
 row.questID, row.fdjRPGHidden = 167, true
 ForeverDungeonJournal_NS.MarkLostQuestRows({ row }, {})
-check(not marker:IsShown() and not row.chainRows[1].rxpDJMarker:IsShown(), "RPG mystery rows reveal no guide hints")
+check(not marker:IsShown() and not row.chainRows[1].rxpHelperMarker:IsShown(), "RPG mystery rows reveal no guide hints")
 row.fdjRPGHidden = nil
 ForeverDungeonJournal_NS.MarkLostQuestRows({ row }, {})
 marker.scripts.OnEnter(marker)
@@ -191,6 +247,55 @@ local someoneElse = newFrame()
 GameTooltip:SetOwner(someoneElse)
 marker.scripts.OnLeave(marker)
 check(GameTooltip:GetOwner() == someoneElse and GameTooltip:IsShown(), "leaving does not hide another addon's tooltip")
+
+GameTooltip:SetHyperlink("quest:167:15")
+check(containsLine("Original quest content: quest:167:15") and containsLine("17-18 Deadmines"), "quest link preserves content and appends guide info")
+check(containsLine("RestedXP Forever Guide (A)") and containsLine("Steps: 1"), "quest tooltip includes group and steps")
+dataCallback(GameTooltip, { type = Enum.TooltipDataType.Quest, id = 167 })
+check(countLine("RestedXP Guides") == 1, "native setter and data callback do not duplicate guide section")
+GameTooltip:SetHyperlink("item:167")
+check(not containsLine("RestedXP Guides"), "reused item tooltip has no stale guide section")
+ItemRefTooltip:SetHyperlink("|cffffff00|Hquest:167:15|h[Oh Brother...]|h|r")
+check(containsLine("17-18 Deadmines", ItemRefTooltip), "clicked chat quest links supported")
+GameTooltip:SetQuestLogTitle(3)
+check(containsLine("Quest ID: 167"), "quest log index resolves to quest ID")
+GameTooltip:SetQuestLogTitle(4)
+check(not containsLine("RestedXP Guides"), "quest log headers excluded")
+local modern = newFrame()
+modern:ClearLines()
+modern:AddLine("Native title")
+dataCallback(modern, { type = Enum.TooltipDataType.Quest, id = 168 })
+check(containsLine("17-18 Deadmines", modern), "modern quest data pipeline supported")
+modern:ClearLines()
+dataCallback(modern, { type = Enum.TooltipDataType.Unit, lines = { { type = 17, id = 168 } } })
+check(containsLine("Quest ID: 168", modern), "native QuestTitle rows supported")
+modern:Hide()
+modern:ClearLines()
+modern:AddLine("Native title")
+dataCallback(modern, { type = Enum.TooltipDataType.Item, id = 167 })
+check(not containsLine("RestedXP Guides", modern), "item IDs never treated as quest IDs")
+modern.forbidden = true
+dataCallback(modern, { type = 1, id = 167 })
+check(not containsLine("RestedXP Guides", modern), "forbidden tooltips untouched")
+modern.forbidden = nil
+local secret = {}
+issecretvalue = function(value) return value == secret end
+dataCallback(modern, { type = 1, id = secret })
+dataCallback(modern, secret)
+check(not containsLine("RestedXP Guides", modern), "secret quest IDs and payloads ignored")
+issecretvalue = nil
+questieMap.ShowOnTooltip({ quests = { [167] = true }, givers = {} }, GameTooltip)
+check(containsLine("Questie original content") and containsLine("17-18 Deadmines"), "Questie objective map tooltip augmented")
+GameTooltip:_Rebuild()
+check(countLine("RestedXP Guides") == 1, "Questie modifier redraw retains exactly one guide section")
+questieMap.ShowOnTooltip({ quests = {}, givers = { NPC = { quest = { questId = 168 } } } }, GameTooltip)
+check(containsLine("Quest ID: 168"), "Questie available quest givers supported")
+questieMap.ShowOnTooltip({ quests = {}, givers = {} }, GameTooltip)
+check(not containsLine("RestedXP Guides"), "Questie unrelated pin has no stale guide info")
+local tracker = newFrame()
+questieTips.RegisterNativeQuestTooltip(tracker)
+tracker:SetQuestPartyProgress(167)
+check(containsLine("17-18 Deadmines", tracker), "late-created Questie tracker tooltip supported")
 
 combat = true
 RXP.RemoveGuide("lazy")
@@ -210,7 +315,7 @@ RXP.guides = {}
 driver.scripts.OnUpdate(driver, 2.1)
 flush()
 check(not marker:IsShown(), "registry replacement invalidates old matches")
-SlashCmdList.RXPDJBRIDGE("quest 167")
+SlashCmdList.RESTEDXPHELPER("quest 167")
 check(DEFAULT_CHAT_FRAME.messages[#DEFAULT_CHAT_FRAME.messages]:find("0 matching guides", 1, true), "diagnostic lookup reports current index")
 
 -- Parsing failure must leave other guides available and finish the scan.
@@ -219,7 +324,7 @@ RXP.ProcessGuideTable = function(g) return g end
 RXP.AddGuide({ key = "bad", name = "Broken", group = "Test" })
 RXP.AddGuide(lazy)
 flush()
-SlashCmdList.RXPDJBRIDGE("")
+SlashCmdList.RESTEDXPHELPER("")
 check(DEFAULT_CHAT_FRAME.messages[#DEFAULT_CHAT_FRAME.messages - 1]:find("1 guides unavailable", 1, true), "parse failures reported without stopping other guides")
 check(#DEFAULT_CHAT_FRAME.messages > 0, "diagnostics available")
 

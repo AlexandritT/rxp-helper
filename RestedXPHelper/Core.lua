@@ -1,5 +1,5 @@
-local _, Bridge = ...
-_G.RXPDJBridge = Bridge
+local _, Helper = ...
+_G.RestedXPHelper = Helper
 
 local LOGO = "Interface\\AddOns\\RXPGuides\\Textures\\rxp_logo-64"
 local index, rows = {}, {}
@@ -8,11 +8,11 @@ local generation, indexedGuides, failedGuides = 0, 0, 0
 local snapshot = {}
 local elapsed, registryElapsed = 0, 0
 local driver = CreateFrame("Frame")
-local RefreshRows, RequestRebuild, TryConnect
+local RefreshRows, RequestRebuild, TryConnect, ConnectJournal
 
 local function Print(message)
     if DEFAULT_CHAT_FRAME then
-        DEFAULT_CHAT_FRAME:AddMessage("|cffffd166RXP DJ Bridge:|r " .. message)
+        DEFAULT_CHAT_FRAME:AddMessage("|cffffd166RestedXP Helper:|r " .. message)
     end
 end
 
@@ -20,26 +20,36 @@ local function HideTooltip(marker)
     if GameTooltip and GameTooltip:GetOwner() == marker then GameTooltip:Hide() end
 end
 
-local function ShowTooltip(marker)
-    if not GameTooltip then return end
-    local matches = Bridge.GetMatches(index, marker.questID)
-    if #matches == 0 then HideTooltip(marker); return end
-    GameTooltip:SetOwner(marker, "ANCHOR_RIGHT")
-    GameTooltip:ClearLines()
-    GameTooltip:AddLine("RestedXP Guides", 1, 0.82, 0.25)
-    GameTooltip:AddLine("Quest ID: " .. marker.questID, 0.65, 0.65, 0.65)
+function Helper.GetQuestMatches(questID)
+    return Helper.GetMatches(index, questID)
+end
+
+function Helper.AddGuideLines(tooltip, questID)
+    local matches = Helper.GetQuestMatches(questID)
+    if #matches == 0 then return false end
+    tooltip:AddLine("RestedXP Guides", 1, 0.82, 0.25)
+    tooltip:AddLine("Quest ID: " .. questID, 0.65, 0.65, 0.65)
     for _, match in ipairs(matches) do
         local guide = match.guide
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(guide.name, 1, 1, 1, true)
-        if guide.group ~= "" then GameTooltip:AddLine(guide.group, 1, 0.82, 0.25, true) end
+        tooltip:AddLine(" ")
+        tooltip:AddLine(guide.name, 1, 1, 1, true)
+        if guide.group ~= "" then tooltip:AddLine(guide.group, 1, 0.82, 0.25, true) end
         if guide.subgroup ~= "" and guide.subgroup ~= guide.group then
-            GameTooltip:AddLine(guide.subgroup, 0.8, 0.8, 0.8, true)
+            tooltip:AddLine(guide.subgroup, 0.8, 0.8, 0.8, true)
         end
         local steps = {}
         for _, number in ipairs(match.steps) do steps[#steps + 1] = tostring(number) end
-        GameTooltip:AddLine("Steps: " .. table.concat(steps, ", "), 0.7, 0.85, 1, true)
+        tooltip:AddLine("Steps: " .. table.concat(steps, ", "), 0.7, 0.85, 1, true)
     end
+    return true
+end
+
+local function ShowTooltip(marker)
+    if not GameTooltip then return end
+    if #Helper.GetQuestMatches(marker.questID) == 0 then HideTooltip(marker); return end
+    GameTooltip:SetOwner(marker, "ANCHOR_RIGHT")
+    GameTooltip:ClearLines()
+    Helper.AddGuideLines(GameTooltip, marker.questID)
     if building then GameTooltip:AddLine("Scanning remaining guides...", 0.7, 0.7, 0.7) end
     GameTooltip:Show()
     marker.tooltipGeneration = generation
@@ -67,18 +77,18 @@ local function CreateMarker(row, isStep)
     marker:SetScript("OnLeave", HideTooltip)
     marker:SetScript("OnHide", HideTooltip)
     marker:Hide()
-    row.rxpDJMarker = marker
+    row.rxpHelperMarker = marker
     return marker
 end
 
 local function UpdateRow(row, isStep, hidden)
     local id
     if isStep then
-        if row.step and not row.step.itemStep then id = Bridge.QuestID(row.step.id) end
+        if row.step and not row.step.itemStep then id = Helper.QuestID(row.step.id) end
     else
-        id = Bridge.QuestID(row.questID)
+        id = Helper.QuestID(row.questID)
     end
-    local marker = row.rxpDJMarker
+    local marker = row.rxpHelperMarker
     local show = not hidden and row:IsShown() and not row.fdjRPGHidden and id and index[id]
     if not show then
         if marker then marker.questID = nil; marker:Hide() end
@@ -150,6 +160,7 @@ local function BuildIndex()
             building = false
             RememberRegistry()
             RefreshRows()
+            if Helper.RefreshQuestTooltips then Helper.RefreshQuestTooltips() end
             if rebuildRequested then RequestRebuild() end
             return
         end
@@ -172,7 +183,7 @@ local function BuildIndex()
             local ok, processed = pcall(rxp.ProcessGuideTable, guide)
             if ok then guide = processed else guide = nil end
         end
-        if guide and Bridge.IndexGuide(pending, guide) then
+        if guide and Helper.IndexGuide(pending, guide) then
             count = count + 1
         elseif sourceRegistry[key] then
             failed = failed + 1
@@ -202,24 +213,31 @@ RequestRebuild = function()
     end)
 end
 
-TryConnect = function()
-    if rxp then return true end
-    local candidate, dj = _G.RXP, _G.ForeverDungeonJournal_NS
-    if type(candidate) ~= "table" or type(candidate.guides) ~= "table" or not dj
-        or type(dj.MarkLostQuestRows) ~= "function" then return false end
-    rxp, journal = candidate, dj
+ConnectJournal = function()
+    if journal then return end
+    local dj = _G.ForeverDungeonJournal_NS
+    if not dj or type(dj.MarkLostQuestRows) ~= "function" then return end
+    journal = dj
     -- This public helper is called at the end of DJ's local RefreshQuestList.
     -- Secure post-hooks preserve DJ's own functions and row click scripts.
     hooksecurefunc(journal, "MarkLostQuestRows", CaptureRows)
-    for _, name in ipairs({ "AddGuide", "RemoveGuide", "LoadCachedGuides", "ReloadGuide" }) do
-        if type(rxp[name]) == "function" then hooksecurefunc(rxp, name, RequestRebuild) end
-    end
     -- Also catch a journal that was already opened before this addon loaded.
     local frame = _G.ForeverDungeonJournalFrame
     if frame and frame.questContent then
         for _, child in ipairs({ frame.questContent:GetChildren() }) do
             if child.questID and child.name then rows[#rows + 1] = child end
         end
+    end
+end
+
+TryConnect = function()
+    ConnectJournal()
+    if rxp then return true end
+    local candidate = _G.RXP
+    if type(candidate) ~= "table" or type(candidate.guides) ~= "table" then return false end
+    rxp = candidate
+    for _, name in ipairs({ "AddGuide", "RemoveGuide", "LoadCachedGuides", "ReloadGuide" }) do
+        if type(rxp[name]) == "function" then hooksecurefunc(rxp, name, RequestRebuild) end
     end
     RequestRebuild()
     return true
@@ -230,7 +248,7 @@ driver:RegisterEvent("PLAYER_REGEN_ENABLED")
 driver:RegisterEvent("ADDON_LOADED")
 driver:SetScript("OnEvent", function(_, event)
     if event == "PLAYER_LOGIN" then
-        if not TryConnect() then Print("Could not connect to RestedXP and Dungeon Journal.") end
+        if not TryConnect() then Print("Could not connect to RestedXP.") end
     elseif event == "ADDON_LOADED" then
         if IsLoggedIn and IsLoggedIn() then TryConnect() end
     elseif event == "PLAYER_REGEN_ENABLED" and rebuildRequested then
@@ -252,14 +270,16 @@ driver:SetScript("OnUpdate", function(_, delta)
     end
 end)
 
-SLASH_RXPDJBRIDGE1 = "/rxpdj"
-SlashCmdList.RXPDJBRIDGE = function(command)
+SLASH_RESTEDXPHELPER1 = "/rxph"
+SLASH_RESTEDXPHELPER2 = "/rxpdj"
+SlashCmdList.RESTEDXPHELPER = function(command)
     command = (command or ""):match("^%s*(.-)%s*$")
     if command == "rescan" then
-        if TryConnect() then RequestRebuild(); Print("Guide rescan queued.") end
+        if TryConnect() then RequestRebuild(); Print("Guide rescan queued.")
+        else Print("Could not connect to RestedXP.") end
     elseif command:match("^quest%s+%d+$") then
         local id = tonumber(command:match("(%d+)$"))
-        local matches = Bridge.GetMatches(index, id)
+        local matches = Helper.GetMatches(index, id)
         Print("Quest " .. id .. ": " .. #matches .. " matching guides.")
         for _, match in ipairs(matches) do Print(match.guide.group .. " / " .. match.guide.name) end
     else
@@ -267,6 +287,6 @@ SlashCmdList.RXPDJBRIDGE = function(command)
         for _ in pairs(index) do quests = quests + 1 end
         Print(indexedGuides .. " guides, " .. quests .. " quests indexed. "
             .. (building and "Scanning... " or "") .. failedGuides .. " guides unavailable.")
-        Print("/rxpdj rescan | /rxpdj quest <questID>")
+        Print("/rxph rescan | /rxph quest <questID>")
     end
 end
