@@ -33,7 +33,7 @@ The default destination is
 `I:\World of Warcraft_2\_forever_\Interface\AddOns\RestedXPHelper`.
 Pass `-WoWPath 'D:\World of Warcraft'` to use a different installation.
 The installer backs up existing `RXPDJBridge` and `RestedXPHelper` directories
-outside AddOns before copying the four addon files and checking their hashes.
+outside AddOns before copying the five addon files and checking their hashes.
 Backups go to `%USERPROFILE%\.t3\backups\rxp-helper`. Override this with
 `-BackupRoot 'D:\WoW Backups'`. The original and renamed builds must not run
 together.
@@ -60,11 +60,23 @@ loader without selecting another guide or changing saved progress. Nothing is
 downloaded, and neither dependency is patched. The index lives in memory and is
 rebuilt on login, guide imports/removals, route reloads and registry changes.
 
-Commands, also available through the old `/rxpdj` alias:
+Commands, also available through `/rxh` and the old `/rxpdj` alias:
 
+- `/rxh orphan` opens a list of quests in your quest log that appear in no installed RXP guide.
 - `/rxph` shows the indexed guide/quest counts and unavailable guide count.
 - `/rxph rescan` rebuilds the index, useful after changing RXP route settings.
 - `/rxph quest 167` lists matching guides for a quest ID.
+
+The orphan window shows each quest's full description, objectives and an
+**Abandon** button. It checks every indexed guide grouping, regardless of your
+current guide or Alt. It waits for a complete, successful guide scan before
+showing results and updates when your quest log changes. **Rescan guides**
+rebuilds the guide index; **Refresh** updates the quest list.
+
+Abandoning requires an in-game confirmation. The confirmation re-checks that
+the quest is still unmatched and still in your log, then resolves it by quest
+ID so log changes cannot target a different quest. Buttons are disabled in
+combat and for quests the client does not allow you to abandon.
 
 Tooltip hooks use readable quest IDs, not quest-title matching. Tooltips without
 a matching guide are unchanged. Restricted quest IDs and forbidden tooltips are
@@ -82,6 +94,7 @@ updating the helper.
 The original DJ-only build is committed and tagged `v1.0.0-dj-bridge`.
 The rename and quest tooltip support are version `1.1.0`.
 Current-group filtering and the Alt override are version `1.2.0`.
+The orphan quest window is version `1.3.0`.
 
 To return to the original build, close WoW, move `RestedXPHelper` out of the
 AddOns directory, then restore the backed-up `RXPDJBridge` folder there. A ZIP
@@ -106,9 +119,10 @@ lua tests/run.lua
 The tests run the production files with mocked WoW frames and RXP data. They
 check matching, multiple guides, included routes, lazy loading, reused rows,
 native and Questie tooltips, imports/removals, optional Dungeon Journal and
-combat deferral. They cannot verify rendering in
-the game client. They also cover current-group filtering, live Alt expansion
-and collapse, and switching guide groupings without rebuilding the index. In-game
-checks should cover switching dungeons, expanding
-prerequisite chains, changing RXP routes, hovering quest tooltips and clicking
-chat quest links.
+combat deferral, current-group filtering, live Alt expansion and collapse, and
+switching guide groupings without rebuilding the index. Orphan checks cover
+cross-group matching, descriptions, live list updates, confirmations and
+abandoning the correct quest after log positions change. Tests cannot verify
+rendering in the game client. In-game checks should cover switching dungeons,
+expanding prerequisite chains, changing RXP routes, hovering quest tooltips,
+clicking chat quest links and opening `/rxh orphan`.

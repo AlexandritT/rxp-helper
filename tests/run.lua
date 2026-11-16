@@ -59,6 +59,28 @@ local function newFrame(parent)
     local f = { parent = parent, shown = true, scripts = {}, level = 1, children = {} }
     if parent then parent.children[#parent.children + 1] = f end
     function f:SetSize(w, h) self.width, self.height = w, h end
+    function f:SetWidth(w) self.width = w end
+    function f:SetHeight(h) self.height = h end
+    function f:GetWidth() return self.width or 610 end
+    function f:GetHeight() return self.height or 320 end
+    function f:ClearAllPoints() end
+    function f:SetText(text) self.text = text end
+    function f:GetText() return self.text end
+    function f:GetStringHeight()
+        return 14 * math.max(1, math.ceil(#(self.text or "") / math.max(1, (self.width or 610) / 7)))
+    end
+    function f:CreateFontString() return newFrame() end
+    function f:SetJustifyH() end
+    function f:SetWordWrap() end
+    function f:SetColorTexture() end
+    function f:SetEnabled(enabled) self.enabled = enabled end
+    function f:SetFrameStrata() end
+    function f:SetClampedToScreen() end
+    function f:SetMovable() end
+    function f:RegisterForDrag() end
+    function f:SetScrollChild(child) self.scrollChild = child end
+    function f:SetVerticalScroll(offset) self.scrollOffset = offset end
+    function f:GetVerticalScroll() return self.scrollOffset or 0 end
     function f:SetFrameLevel(level) self.level = level end
     function f:GetFrameLevel() return self.level end
     function f:EnableMouse(value) self.mouse = value end
@@ -105,7 +127,12 @@ local function newFrame(parent)
     frames[#frames + 1] = f
     return f
 end
-CreateFrame = function(_, _, parent) return newFrame(parent) end
+CreateFrame = function(_, name, parent, template)
+    local frame = newFrame(parent)
+    if name then _G[name] = frame end
+    if template == "BasicFrameTemplateWithInset" then frame.TitleText = newFrame() end
+    return frame
+end
 C_Timer = { After = function(delay, callback)
     queue[#queue + 1] = { at = clock + delay, callback = callback }
 end }
@@ -422,5 +449,100 @@ flush()
 SlashCmdList.RESTEDXPHELPER("")
 check(DEFAULT_CHAT_FRAME.messages[#DEFAULT_CHAT_FRAME.messages - 1]:find("1 guides unavailable", 1, true), "parse failures reported without stopping other guides")
 check(#DEFAULT_CHAT_FRAME.messages > 0, "diagnostics available")
+
+StaticPopupDialogs, UISpecialFrames = {}, {}
+local popup, abandoned, selectedQuest, abandonTarget = nil, {}, 167, nil
+StaticPopup_Show = function(key, title, _, data) popup = { key = key, title = title, data = data } end
+loadAddonFile("OrphanQuests.lua", Helper)
+local orphanEvents = frames[#frames]
+local orphanList, orphanReason = Helper.GetOrphanQuests()
+check(#orphanList == 0 and orphanReason:find("could not be read", 1, true), "failed guide scan never produces false orphan results")
+RXP.RemoveGuide("bad")
+local otherGroup = guide("orphan-test-other", "Another grouping", { { tag = "accept", questId = 777 } })
+otherGroup.group = "RestedXP Survival Guide (A)"
+RXP.AddGuide(otherGroup)
+flush()
+local log = {
+    { title = "Collapsed zone", isHeader = true, isCollapsed = true },
+    { questID = 167, title = "Guide quest", level = 20 },
+    { questID = 777, title = "Other grouping quest", level = 20 },
+    { questID = 901, title = "Unlisted alpha", level = 21 },
+    { questID = 902, title = "Unlisted beta", level = 22 },
+    { questID = 901, title = "Unlisted alpha", level = 21 },
+    { questID = 903, level = 23 },
+}
+C_QuestLog.GetNumQuestLogEntries = function() return #log end
+C_QuestLog.GetInfo = function(i) return log[i] end
+C_QuestLog.GetSelectedQuest = function() return selectedQuest end
+C_QuestLog.SetSelectedQuest = function(id) selectedQuest = id end
+C_QuestLog.CanAbandonQuest = function(id) return id ~= 902 end
+C_QuestLog.SetAbandonQuest = function() abandonTarget = selectedQuest end
+C_QuestLog.GetAbandonQuest = function() return abandonTarget end
+C_QuestLog.AbandonQuest = function()
+    abandoned[#abandoned + 1] = abandonTarget
+    for i = #log, 1, -1 do if log[i].questID == abandonTarget then table.remove(log, i) end end
+end
+GetQuestLogQuestText = function(i)
+    if log[i].questID == 901 then return string.rep("Full native quest description. ", 20), "Collect 8 samples." end
+    return "Description for " .. tostring(log[i].questID)
+end
+orphanList, orphanReason = Helper.GetOrphanQuests()
+check(not orphanReason and #orphanList == 3, "orphan list excludes headers, duplicates and all guide groupings")
+check(orphanList[1].title == "Quest 903", "unloaded title has stable quest ID fallback")
+check(orphanList[2].id == 901 and orphanList[2].description:find("Full native quest description", 1, true)
+    and orphanList[2].objectives == "Collect 8 samples.", "orphan list includes native description and objectives")
+check(not orphanList[3].canAbandon and selectedQuest == 167, "non-abandonable quests remain listed and description reads preserve selection")
+altDown = true
+check(#Helper.GetOrphanQuests() == 3, "orphan detection ignores Alt filtering")
+altDown = false
+SlashCmdList.RESTEDXPHELPER("orphan")
+local orphanWindow = _G.RestedXPHelperOrphanFrame
+check(SLASH_RESTEDXPHELPER3 == "/rxh" and orphanWindow:IsShown(), "/rxh orphan opens the quest list")
+check(#orphanWindow.rows == 3 and orphanWindow.rows[2].description:GetText():find("Collect 8 samples.", 1, true), "window renders quest descriptions and objectives")
+check(not orphanWindow.rows[3].abandon.enabled, "unavailable abandon action is disabled")
+check(UISpecialFrames[#UISpecialFrames] == "RestedXPHelperOrphanFrame", "Escape can close orphan window")
+orphanWindow.rows[2].abandon.scripts.OnClick()
+check(popup and popup.data.questID == 901 and #abandoned == 0, "Abandon button asks for confirmation without removing quest")
+local confirmedData = popup.data
+local nowMatched = guide("now-matched", "New guide", { { tag = "accept", questId = 901 } })
+RXP.AddGuide(nowMatched)
+flush()
+StaticPopupDialogs[popup.key].OnAccept(nil, confirmedData)
+check(#abandoned == 0, "confirmation rechecks quest has not gained a guide")
+RXP.RemoveGuide("now-matched")
+flush()
+Helper.ConfirmAbandonOrphan(901)
+table.insert(log, 2, { questID = 904, title = "Newly accepted quest" })
+StaticPopupDialogs[popup.key].OnAccept(nil, popup.data)
+check(abandoned[1] == 901 and #abandoned == 1 and selectedQuest == 167, "confirmation resolves moved quest by ID and restores previous selection")
+local found901 = false
+for _, quest in ipairs(Helper.GetOrphanQuests()) do if quest.id == 901 then found901 = true end end
+check(not found901, "abandoned quest disappears from refreshed list")
+local ok = Helper.AbandonOrphanQuest(167)
+check(not ok and #abandoned == 1, "guide quests cannot be abandoned through orphan action")
+ok = Helper.AbandonOrphanQuest(901)
+check(not ok and #abandoned == 1, "stale quest action cannot abandon another quest")
+ok = Helper.AbandonOrphanQuest(902)
+check(not ok and #abandoned == 1, "client refusal prevents abandoning protected quest")
+combat = true
+ok = Helper.AbandonOrphanQuest(904)
+Helper.RefreshOrphanWindow()
+check(not ok and #abandoned == 1, "combat disables quest abandonment")
+combat = false
+C_QuestLog.GetAbandonQuest = function() return 999 end
+ok = Helper.AbandonOrphanQuest(904)
+check(not ok and #abandoned == 1 and selectedQuest == 167, "wrong native abandonment target is rejected and selection restored")
+C_QuestLog.GetAbandonQuest = function() return abandonTarget end
+Helper.RequestGuideRescan()
+orphanList, orphanReason = Helper.GetOrphanQuests()
+ok = Helper.AbandonOrphanQuest(904)
+check(#orphanList == 0 and orphanReason and not ok and #abandoned == 1, "pending scan blocks orphan classification and abandonment")
+flush()
+table.insert(log, { questID = 905, title = "Accepted after opening" })
+orphanEvents.scripts.OnEvent(orphanEvents, "QUEST_LOG_UPDATE")
+flush()
+check(orphanWindow.status:GetText():find("4 quests", 1, true), "open orphan list refreshes when quest log changes")
+RXP.RemoveGuide("orphan-test-other")
+flush()
 
 print("PASS: " .. passed .. " checks")

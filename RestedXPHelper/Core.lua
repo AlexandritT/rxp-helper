@@ -5,6 +5,7 @@ local LOGO = "Interface\\AddOns\\RXPGuides\\Textures\\rxp_logo-64"
 local index, rows = {}, {}
 local rxp, journal, registry, building, rebuildRequested
 local generation, indexedGuides, failedGuides = 0, 0, 0
+local indexBuilt = false
 local snapshot = {}
 local displayScope
 local elapsed, registryElapsed = 0, 0
@@ -26,6 +27,11 @@ function Helper.GetQuestMatches(questID)
     local group = Helper.GroupKey(rxp and rxp.currentGuide)
     if not group then return {} end
     return Helper.GetMatches(index, questID, group)
+end
+
+function Helper.IsQuestInAnyGuide(questID)
+    local id = Helper.QuestID(questID)
+    return id ~= nil and index[id] ~= nil
 end
 
 function Helper.AddGuideLines(tooltip, questID)
@@ -174,12 +180,14 @@ local function BuildIndex()
         local key = keys[cursor]
         if key == nil then
             index = pending
+            indexBuilt = true
             indexedGuides, failedGuides = count, failed
             generation = generation + 1
             building = false
             RememberRegistry()
             RefreshRows()
             if Helper.RefreshQuestTooltips then Helper.RefreshQuestTooltips(true) end
+            if Helper.RefreshOrphanWindow then Helper.RefreshOrphanWindow() end
             if rebuildRequested then RequestRebuild() end
             return
         end
@@ -223,6 +231,7 @@ end
 local rebuildScheduled
 RequestRebuild = function()
     rebuildRequested = true
+    if Helper.RefreshOrphanWindow then Helper.RefreshOrphanWindow() end
     if building or rebuildScheduled then return end
     rebuildScheduled = true
     C_Timer.After(0.25, function()
@@ -231,6 +240,19 @@ RequestRebuild = function()
         BuildIndex()
     end)
 end
+
+function Helper.GetGuideIndexStatus()
+    local pending = not indexBuilt or building or rebuildRequested or rebuildScheduled
+        or (rxp and RegistryChanged())
+    return {
+        ready = rxp ~= nil and not pending and failedGuides == 0,
+        pending = pending == true,
+        failed = failedGuides,
+        guides = indexedGuides,
+    }
+end
+
+Helper.RequestGuideRescan = RequestRebuild
 
 ConnectJournal = function()
     if journal then return end
@@ -299,9 +321,12 @@ end)
 
 SLASH_RESTEDXPHELPER1 = "/rxph"
 SLASH_RESTEDXPHELPER2 = "/rxpdj"
+SLASH_RESTEDXPHELPER3 = "/rxh"
 SlashCmdList.RESTEDXPHELPER = function(command)
     command = (command or ""):match("^%s*(.-)%s*$")
-    if command == "rescan" then
+    if command == "orphan" then
+        if Helper.ShowOrphanWindow then Helper.ShowOrphanWindow() end
+    elseif command == "rescan" then
         if TryConnect() then RequestRebuild(); Print("Guide rescan queued.")
         else Print("Could not connect to RestedXP.") end
     elseif command:match("^quest%s+%d+$") then
@@ -314,6 +339,6 @@ SlashCmdList.RESTEDXPHELPER = function(command)
         for _ in pairs(index) do quests = quests + 1 end
         Print(indexedGuides .. " guides, " .. quests .. " quests indexed. "
             .. (building and "Scanning... " or "") .. failedGuides .. " guides unavailable.")
-        Print("/rxph rescan | /rxph quest <questID>")
+        Print("/rxh orphan | /rxph rescan | /rxph quest <questID>")
     end
 end
