@@ -22,6 +22,14 @@ function Helper.CleanText(value)
         :gsub("|T.-|t", ""):gsub("|A.-|a", ""))
 end
 
+function Helper.GroupKey(guide)
+    if type(guide) ~= "table" or guide.empty then return nil end
+    -- Match the top-level grouping shown in RXP's guide selector. Several
+    -- internal groups can share a display name; '*' only marks low priority.
+    local group = Helper.CleanText(guide.groupdisplayname or guide.group):gsub("^%*", "")
+    if group ~= "" then return group end
+end
+
 -- Read RXP's parsed elements, never guide text or quest titles. RXP has
 -- already applied faction, class, race and quest-ID conversions here.
 function Helper.IndexGuide(index, guide)
@@ -34,6 +42,7 @@ function Helper.IndexGuide(index, guide)
         key = guide.key or ((guide.group or "") .. "||" .. guide.name),
         name = name,
         group = group,
+        groupKey = Helper.GroupKey(guide),
         subgroup = Helper.CleanText(guide.subgroup),
     }
 
@@ -66,10 +75,12 @@ function Helper.IndexGuide(index, guide)
     return true
 end
 
-function Helper.GetMatches(index, questID)
+function Helper.GetMatches(index, questID, groupKey)
     local matches = {}
     for _, match in pairs(index[Helper.QuestID(questID)] or {}) do
-        matches[#matches + 1] = match
+        if not groupKey or match.guide.groupKey == groupKey then
+            matches[#matches + 1] = match
+        end
     end
     table.sort(matches, function(a, b)
         local x, y = a.guide, b.guide

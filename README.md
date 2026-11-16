@@ -8,6 +8,13 @@ and tracker tooltips are supported. The original quest text stays intact.
 Quests in ForeverDungeonJournal also get a small RestedXP logo. Hover the logo
 to see the same guide information. Dungeon Journal is optional.
 
+By default, guide information and DJ markers only appear for quests in your
+current RXP guide grouping, such as Forever Dungeon Guide or Forever Speedrun
+Guide. All matching chapters in that top-level grouping are included. Hold
+**Alt** to show matches from every installed grouping. Open tooltips and DJ
+markers update when you press or release Alt or switch guide groupings. If no
+guide is selected, hold Alt to see guide information.
+
 Main quests and expanded prerequisite rows are supported. Item-only steps and
 quests hidden by Dungeon Journal's RPG mode have no marker. Existing quest
 selection, quest symbols, completion ticks and chain controls stay in place.
@@ -60,7 +67,8 @@ Commands, also available through the old `/rxpdj` alias:
 
 Tooltip hooks use readable quest IDs, not quest-title matching. Tooltips without
 a matching guide are unchanged. Restricted quest IDs and forbidden tooltips are
-skipped. Hover again after a rescan to update an already appended guide section.
+skipped. Native and Questie tooltips rebuild through their original rendering
+methods when the active grouping or Alt state changes.
 
 Built against the installed Forever client interface `16001`,
 ForeverDungeonJournal `2.0.5` and RestedXP `v4.11.36`. The integration relies on
@@ -72,6 +80,7 @@ updating the helper.
 
 The original DJ-only build is committed and tagged `v1.0.0-dj-bridge`.
 The rename and quest tooltip support are version `1.1.0`.
+Current-group filtering and the Alt override are version `1.2.0`.
 
 To return to the original build, close WoW, move `RestedXPHelper` out of the
 AddOns directory, then restore the backed-up `RXPDJBridge` folder there. A ZIP
@@ -97,6 +106,8 @@ The tests run the production files with mocked WoW frames and RXP data. They
 check matching, multiple guides, included routes, lazy loading, reused rows,
 native and Questie tooltips, imports/removals, optional Dungeon Journal and
 combat deferral. They cannot verify rendering in
-the game client. In-game checks should cover switching dungeons, expanding
+the game client. They also cover current-group filtering, live Alt expansion
+and collapse, and switching guide groupings without rebuilding the index. In-game
+checks should cover switching dungeons, expanding
 prerequisite chains, changing RXP routes, hovering quest tooltips and clicking
 chat quest links.

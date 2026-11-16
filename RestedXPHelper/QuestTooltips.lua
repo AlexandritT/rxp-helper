@@ -1,4 +1,5 @@
 local _, Helper = ...
+local unpack = unpack or table.unpack
 local states = setmetatable({}, { __mode = "k" })
 local hookedModules = setmetatable({}, { __mode = "k" })
 
@@ -12,7 +13,7 @@ end
 
 local function Reset(tooltip)
     local state = states[tooltip]
-    if state then state.added, state.quests = {}, {} end
+    if state then state.added, state.quests, state.refresh = {}, {}, nil end
 end
 
 local function Append(tooltip, value, show)
@@ -69,15 +70,34 @@ function Helper.HookQuestTooltip(tooltip)
         SetQuestByID = function(frame, id) Append(frame, id, true) end,
         SetQuestPartyProgress = function(frame, id) Append(frame, id, true) end,
     }) do
-        if type(tooltip[name]) == "function" then hooksecurefunc(tooltip, name, callback) end
+        if type(tooltip[name]) == "function" then
+            local method = name
+            hooksecurefunc(tooltip, method, function(frame, ...)
+                callback(frame, ...)
+                local state = states[frame]
+                if state and next(state.quests) then
+                    local args, count = { ... }, select("#", ...)
+                    state.refresh = function()
+                        frame[method](frame, unpack(args, 1, count))
+                    end
+                end
+            end)
+        end
     end
 end
 
-function Helper.RefreshQuestTooltips()
-    -- A tooltip opened during the first scan gains its guide block when ready.
+function Helper.RefreshQuestTooltips(rebuild)
+    -- Replay the tooltip's own renderer when the filter changes, so native
+    -- text, objectives, colors and other addons' sections are preserved.
     for tooltip, state in pairs(states) do
         if IsUsable(tooltip) and tooltip:IsShown() then
-            for id in pairs(state.quests) do Append(tooltip, id, true) end
+            if rebuild and state.refresh and not state.refreshing then
+                state.refreshing = true
+                state.refresh()
+                state.refreshing = false
+            else
+                for id in pairs(state.quests) do Append(tooltip, id, true) end
+            end
         end
     end
 end
@@ -97,6 +117,11 @@ local function FromTooltipData(tooltip, data)
                 and line.type == questTitle then Append(tooltip, line.id, false) end
         end
     end
+    local state = states[tooltip]
+    if state and next(state.quests) and not state.refresh
+        and type(tooltip.RebuildFromTooltipInfo) == "function" then
+        state.refresh = function() tooltip:RebuildFromTooltipInfo() end
+    end
 end
 
 local function FromQuestieMap(tooltip)
@@ -107,6 +132,10 @@ local function FromQuestieMap(tooltip)
     for id in pairs(tooltip.questOrder or {}) do Append(tooltip, id, true) end
     for _, quests in pairs(tooltip.npcAndObjectOrder or {}) do
         for _, quest in pairs(quests) do Append(tooltip, quest.questId, true) end
+    end
+    local state = states[tooltip]
+    if state and type(tooltip._Rebuild) == "function" then
+        state.refresh = function() tooltip:_Rebuild() end
     end
 end
 

@@ -6,6 +6,7 @@ local index, rows = {}, {}
 local rxp, journal, registry, building, rebuildRequested
 local generation, indexedGuides, failedGuides = 0, 0, 0
 local snapshot = {}
+local displayScope
 local elapsed, registryElapsed = 0, 0
 local driver = CreateFrame("Frame")
 local RefreshRows, RequestRebuild, TryConnect, ConnectJournal
@@ -21,7 +22,10 @@ local function HideTooltip(marker)
 end
 
 function Helper.GetQuestMatches(questID)
-    return Helper.GetMatches(index, questID)
+    if IsAltKeyDown and IsAltKeyDown() then return Helper.GetMatches(index, questID) end
+    local group = Helper.GroupKey(rxp and rxp.currentGuide)
+    if not group then return {} end
+    return Helper.GetMatches(index, questID, group)
 end
 
 function Helper.AddGuideLines(tooltip, questID)
@@ -40,6 +44,9 @@ function Helper.AddGuideLines(tooltip, questID)
         local steps = {}
         for _, number in ipairs(match.steps) do steps[#steps + 1] = tostring(number) end
         tooltip:AddLine("Steps: " .. table.concat(steps, ", "), 0.7, 0.85, 1, true)
+    end
+    if not (IsAltKeyDown and IsAltKeyDown()) then
+        tooltip:AddLine("Hold Alt to show all guide groupings", 0.65, 0.65, 0.65, true)
     end
     return true
 end
@@ -89,7 +96,8 @@ local function UpdateRow(row, isStep, hidden)
         id = Helper.QuestID(row.questID)
     end
     local marker = row.rxpHelperMarker
-    local show = not hidden and row:IsShown() and not row.fdjRPGHidden and id and index[id]
+    local show = not hidden and row:IsShown() and not row.fdjRPGHidden
+        and id and #Helper.GetQuestMatches(id) > 0
     if not show then
         if marker then marker.questID = nil; marker:Hide() end
         return
@@ -108,6 +116,17 @@ RefreshRows = function()
             UpdateRow(stepRow, true, row.fdjRPGHidden or not row:IsShown())
         end
     end
+end
+
+function Helper.RefreshDisplayScope()
+    local scope = (IsAltKeyDown and IsAltKeyDown()) and "all"
+        or ("group:" .. (Helper.GroupKey(rxp and rxp.currentGuide) or ""))
+    if scope == displayScope then return false end
+    displayScope = scope
+    generation = generation + 1
+    RefreshRows()
+    if Helper.RefreshQuestTooltips then Helper.RefreshQuestTooltips(true) end
+    return true
 end
 
 local function CaptureRows(buttons)
@@ -160,7 +179,7 @@ local function BuildIndex()
             building = false
             RememberRegistry()
             RefreshRows()
-            if Helper.RefreshQuestTooltips then Helper.RefreshQuestTooltips() end
+            if Helper.RefreshQuestTooltips then Helper.RefreshQuestTooltips(true) end
             if rebuildRequested then RequestRebuild() end
             return
         end
@@ -239,6 +258,10 @@ TryConnect = function()
     for _, name in ipairs({ "AddGuide", "RemoveGuide", "LoadCachedGuides", "ReloadGuide" }) do
         if type(rxp[name]) == "function" then hooksecurefunc(rxp, name, RequestRebuild) end
     end
+    if type(rxp.LoadGuide) == "function" then
+        hooksecurefunc(rxp, "LoadGuide", Helper.RefreshDisplayScope)
+    end
+    Helper.RefreshDisplayScope()
     RequestRebuild()
     return true
 end
@@ -246,13 +269,16 @@ end
 driver:RegisterEvent("PLAYER_LOGIN")
 driver:RegisterEvent("PLAYER_REGEN_ENABLED")
 driver:RegisterEvent("ADDON_LOADED")
-driver:SetScript("OnEvent", function(_, event)
+driver:RegisterEvent("MODIFIER_STATE_CHANGED")
+driver:SetScript("OnEvent", function(_, event, key)
     if event == "PLAYER_LOGIN" then
         if not TryConnect() then Print("Could not connect to RestedXP.") end
     elseif event == "ADDON_LOADED" then
         if IsLoggedIn and IsLoggedIn() then TryConnect() end
     elseif event == "PLAYER_REGEN_ENABLED" and rebuildRequested then
         RequestRebuild()
+    elseif event == "MODIFIER_STATE_CHANGED" and (key == "LALT" or key == "RALT") then
+        Helper.RefreshDisplayScope()
     end
 end)
 
@@ -262,7 +288,8 @@ driver:SetScript("OnUpdate", function(_, delta)
     if elapsed >= 0.2 then
         elapsed = 0
         local frame = _G.ForeverDungeonJournalFrame
-        if frame and frame:IsShown() then RefreshRows() end
+        local changed = Helper.RefreshDisplayScope()
+        if not changed and frame and frame:IsShown() then RefreshRows() end
     end
     if registryElapsed >= 2 then
         registryElapsed = 0

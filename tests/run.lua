@@ -48,11 +48,13 @@ check(not Helper.IndexGuide({}, second), "disabled guides excluded")
 second.disabled, second.internal = nil, true
 check(not Helper.IndexGuide({}, second), "internal helpers excluded")
 check(not Helper.IndexGuide({}, { name = "Lazy" }), "unparsed guide safely skipped")
+check(Helper.GroupKey({ group = "internal", groupdisplayname = "|cffff0000*Displayed grouping|r" })
+    == "Displayed grouping", "grouping follows RXP display name without priority prefix")
 
 -- A small WoW API mock exercises event timing, post-hooks, pooled rows and
 -- tooltips. Production code runs unchanged in this environment.
 local queue, frames = {}, {}
-local clock, combat = 0, false
+local clock, combat, altDown = 0, false, false
 local function newFrame(parent)
     local f = { parent = parent, shown = true, scripts = {}, level = 1, children = {} }
     if parent then parent.children[#parent.children + 1] = f end
@@ -108,6 +110,7 @@ C_Timer = { After = function(delay, callback)
     queue[#queue + 1] = { at = clock + delay, callback = callback }
 end }
 InCombatLockdown = function() return combat end
+IsAltKeyDown = function() return altDown end
 IsLoggedIn = function() return true end
 DEFAULT_CHAT_FRAME = { messages = {}, AddMessage = function(self, message)
     self.messages[#self.messages + 1] = message
@@ -167,7 +170,7 @@ local function flush()
 end
 
 local lazy = guide("lazy", "17-18 Deadmines", { { tag = "accept", questId = 167 } })
-local selected = { key = "selected", progress = 42 }
+local selected = { key = "selected", group = lazy.group, progress = 42 }
 local fetches, processes = 0, 0
 RXP = {
     guides = { lazy = { key = "lazy", name = lazy.name, group = lazy.group } },
@@ -182,13 +185,16 @@ RXP = {
         processes = processes + 1
         -- Simulate RXP's #include expansion. This quest exists only in the
         -- expanded route, so indexing raw elements would miss it.
-        return guide(source.key, source.name, {
+        local processed = guide(source.key, source.name, source.key == "lazy" and {
             { tag = "accept", questId = 167 }, { tag = "turnin", questId = 168 },
-        })
+        } or source.steps[1].elements)
+        processed.group, processed.groupdisplayname = source.group, source.groupdisplayname
+        return processed
     end,
     AddGuide = function(g) RXP.guides[g.key] = g; return true end,
     RemoveGuide = function(key) RXP.guides[key] = nil end,
     ReloadGuide = function() end,
+    LoadGuide = function(self, current) self.currentGuide = current end,
 }
 local originalRefreshes = 0
 local djNamespace = {
@@ -296,6 +302,86 @@ local tracker = newFrame()
 questieTips.RegisterNativeQuestTooltip(tracker)
 tracker:SetQuestPartyProgress(167)
 check(containsLine("17-18 Deadmines", tracker), "late-created Questie tracker tooltip supported")
+
+local foreign = guide("foreign", "Survival route", {
+    { tag = "accept", questId = 167 }, { tag = "accept", questId = 900 },
+})
+foreign.group = "RestedXP Survival Guide (A)"
+local chapter = guide("chapter", "Next chapter in current grouping", { { tag = "turnin", questId = 167 } })
+RXP.AddGuide(foreign)
+RXP.AddGuide(chapter)
+flush()
+check(#Helper.GetQuestMatches(167) == 2, "default includes every matching chapter within current grouping")
+check(#Helper.GetQuestMatches(900) == 0, "default excludes quests from other groupings")
+GameTooltip:SetHyperlink("quest:167:15")
+check(containsLine("17-18 Deadmines") and containsLine(chapter.name) and not containsLine(foreign.name),
+    "default quest tooltip hides other groupings")
+local filteredHeight = #GameTooltip.lines
+modern.currentData = { type = Enum.TooltipDataType.Quest, id = 167 }
+function modern:RebuildFromTooltipInfo()
+    self:ClearLines()
+    self:AddLine("Native title")
+    dataCallback(self, self.currentData)
+    self:Show()
+end
+modern:RebuildFromTooltipInfo()
+local foreignRow = newFrame(ForeverDungeonJournalFrame.questContent)
+foreignRow.questID, foreignRow.name = 900, {}
+foreignRow.chainRows = { newFrame(foreignRow) }
+foreignRow.chainRows[1].step = { id = 900 }
+ForeverDungeonJournal_NS.MarkLostQuestRows({ row, foreignRow }, {})
+check(not foreignRow.rxpHelperMarker and not foreignRow.chainRows[1].rxpHelperMarker,
+    "DJ quest and prerequisite markers hidden outside current grouping")
+altDown = true
+driver.scripts.OnEvent(driver, "MODIFIER_STATE_CHANGED", "LALT")
+check(containsLine(foreign.name) and #GameTooltip.lines > filteredHeight,
+    "holding Alt expands an already-open quest tooltip to all groupings")
+check(countLine("RestedXP Guides") == 1 and containsLine("Original quest content: quest:167:15"),
+    "Alt refresh preserves native content and avoids duplicate guide blocks")
+check(containsLine(foreign.name, modern) and containsLine("Native title", modern),
+    "modern data tooltip rebuilds with Alt without copying native lines")
+check(containsLine(foreign.name, ItemRefTooltip), "Alt expands an already-open chat quest tooltip")
+check(foreignRow.rxpHelperMarker:IsShown() and foreignRow.chainRows[1].rxpHelperMarker:IsShown(),
+    "Alt reveals DJ quest and prerequisite markers from other groupings")
+altDown = false
+driver.scripts.OnEvent(driver, "MODIFIER_STATE_CHANGED", "LALT")
+check(not containsLine(foreign.name) and #GameTooltip.lines == filteredHeight,
+    "releasing Alt shrinks the open tooltip back to its original size")
+check(not containsLine(foreign.name, modern) and not containsLine(foreign.name, ItemRefTooltip),
+    "modern and chat quest tooltips collapse on Alt release")
+check(not foreignRow.rxpHelperMarker:IsShown() and not foreignRow.chainRows[1].rxpHelperMarker:IsShown(),
+    "releasing Alt hides out-of-group DJ markers")
+questieMap.ShowOnTooltip({ quests = { [167] = true }, givers = {} }, GameTooltip)
+altDown = true
+driver.scripts.OnEvent(driver, "MODIFIER_STATE_CHANGED", "RALT")
+check(containsLine(foreign.name) and containsLine("Questie original content"),
+    "right Alt expands an open Questie map tooltip")
+altDown = false
+driver.scripts.OnEvent(driver, "MODIFIER_STATE_CHANGED", "RALT")
+check(not containsLine(foreign.name) and countLine("RestedXP Guides") == 1,
+    "Questie tooltip collapses without stale or duplicate guide sections")
+check(not containsLine(foreign.name, tracker), "open tracker tooltip returns to current grouping")
+GameTooltip:SetHyperlink("quest:167:15")
+local beforeSwitch = processes
+RXP:LoadGuide({ key = "foreign-selected", group = foreign.group })
+check(containsLine(foreign.name) and not containsLine(chapter.name),
+    "switching current grouping refreshes the open tooltip immediately")
+check(foreignRow.rxpHelperMarker:IsShown() and not row.rxpHelperMarker:IsShown(),
+    "switching groupings refreshes DJ marker visibility")
+check(processes == beforeSwitch, "changing grouping reuses index instead of reparsing guides")
+RXP:LoadGuide(nil)
+check(#Helper.GetQuestMatches(167) == 0 and not containsLine("RestedXP Guides"),
+    "no selected guide means no default guide sections")
+altDown = true
+driver.scripts.OnEvent(driver, "MODIFIER_STATE_CHANGED", "LALT")
+check(#Helper.GetQuestMatches(167) == 3 and containsLine(foreign.name),
+    "Alt shows all guides even with no current grouping")
+altDown = false
+RXP:LoadGuide(selected)
+driver.scripts.OnEvent(driver, "MODIFIER_STATE_CHANGED", "LALT")
+RXP.RemoveGuide("foreign")
+RXP.RemoveGuide("chapter")
+flush()
 
 combat = true
 RXP.RemoveGuide("lazy")
