@@ -4,6 +4,7 @@ A standalone addon for WoW Forever. Quest tooltips show the installed RestedXP
 guides that contain that quest, including the guide title, group, subgroup and
 step numbers. Native quest tooltips, clicked chat quest links and Questie map
 and tracker tooltips are supported. The original quest text stays intact.
+Mob tooltips are excluded, even when they list quest objectives or Alt is held.
 
 Quests in ForeverDungeonJournal also get a small RestedXP logo. Hover the logo
 to see the same guide information. Dungeon Journal is optional.

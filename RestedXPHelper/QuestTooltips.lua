@@ -105,7 +105,10 @@ end
 local function FromTooltipData(tooltip, data)
     if not IsUsable(tooltip) or not IsPublic(data) or type(data) ~= "table" then return end
     local types = Enum and Enum.TooltipDataType or {}
-    if IsPublic(data.type) and data.type ~= nil
+    -- Mobs can contain native QuestTitle/objective rows too. Those describe
+    -- the hovered unit, not a quest tooltip, and must never gain guide info.
+    if not IsPublic(data.type) or (types.Unit ~= nil and data.type == types.Unit) then return end
+    if data.type ~= nil
         and (data.type == types.Quest or data.type == types.QuestPartyProgress) then
         Append(tooltip, data.id, false)
     end
